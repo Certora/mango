@@ -72,6 +72,263 @@ pub const LIQ_MIN_COLL_RATIO: U64F64 = U64F64!(1.01);
 pub struct Processor {}
 
 impl Processor {
+
+    // CERTORA RULES START //
+
+        // helper functions:
+        #[inline(never)]
+        fn balance_of(
+            program_id: &Pubkey,
+            accounts: &[AccountInfo]
+        ) -> MangoResult<u64> {
+            const NUM_FIXED: usize = 8;
+            let accounts = array_ref![accounts, 0, NUM_FIXED + 2 * NUM_MARKETS];
+            let (
+                fixed_accs,
+                open_orders_accs,
+                oracle_accs,
+            ) = array_refs![accounts, NUM_FIXED, NUM_MARKETS, NUM_MARKETS];
+    
+            let [
+                mango_group_acc,
+                margin_account_acc,
+                owner_acc,
+                token_account_acc,
+                vault_acc,
+                signer_acc,
+                token_prog_acc,
+                clock_acc,
+            ] = fixed_accs;
+    
+    
+            let mut mango_group = MangoGroup::load_mut_checked(
+                mango_group_acc, program_id
+            )?;
+            let mut margin_account = MarginAccount::load_mut_checked(
+                program_id, margin_account_acc, mango_group_acc.key
+            )?;
+    
+            let token_index = mango_group.get_token_index_with_vault(vault_acc.key).unwrap();
+    
+            let index: &MangoIndex = &mango_group.indexes[token_index];
+            let native_deposits: u64 = (margin_account.deposits[token_index].checked_mul(index.deposit).unwrap()).to_num();
+            let available = native_deposits;
+    
+            Ok(available)
+        }
+    
+        #[inline(never)]
+        fn balance_of_token(
+            program_id: &Pubkey,
+            accounts: &[AccountInfo],
+            token_index: usize
+        ) -> MangoResult<u64> {
+            const NUM_FIXED: usize = 8;
+            let accounts = array_ref![accounts, 0, NUM_FIXED + 2 * NUM_MARKETS];
+            let (
+                fixed_accs,
+                open_orders_accs,
+                oracle_accs,
+            ) = array_refs![accounts, NUM_FIXED, NUM_MARKETS, NUM_MARKETS];
+    
+            let [
+                mango_group_acc,
+                margin_account_acc,
+                owner_acc,
+                token_account_acc,
+                vault_acc,
+                signer_acc,
+                token_prog_acc,
+                clock_acc,
+            ] = fixed_accs;
+    
+    
+            let mut mango_group = MangoGroup::load_mut_checked(
+                mango_group_acc, program_id
+            )?;
+            let mut margin_account = MarginAccount::load_mut_checked(
+                program_id, margin_account_acc, mango_group_acc.key
+            )?;
+    
+            let index: &MangoIndex = &mango_group.indexes[token_index];
+            let native_deposits: u64 = (margin_account.deposits[token_index].checked_mul(index.deposit).unwrap()).to_num();
+            let available = native_deposits;
+    
+            Ok(available)
+        }
+    
+        #[inline(never)]
+        fn total_supply_of_token(
+            program_id: &Pubkey,
+            accounts: &[AccountInfo]
+        ) -> MangoResult<u64> {
+            const NUM_FIXED: usize = 8;
+            let accounts = array_ref![accounts, 0, NUM_FIXED + 2 * NUM_MARKETS];
+            let (
+                fixed_accs,
+                open_orders_accs,
+                oracle_accs,
+            ) = array_refs![accounts, NUM_FIXED, NUM_MARKETS, NUM_MARKETS];
+    
+            let [
+                mango_group_acc,
+                margin_account_acc,
+                owner_acc,
+                token_account_acc,
+                vault_acc,
+                signer_acc,
+                token_prog_acc,
+                clock_acc,
+            ] = fixed_accs;
+    
+    
+            let mut mango_group = MangoGroup::load_mut_checked(
+                mango_group_acc, program_id
+            )?;
+            let mut margin_account = MarginAccount::load_mut_checked(
+                program_id, margin_account_acc, mango_group_acc.key
+            )?;
+    
+            let token_index = mango_group.get_token_index_with_vault(vault_acc.key).unwrap();
+    
+            let total_supply: u64 = mango_group.get_total_native_deposit(token_index);
+    
+            Ok(total_supply)
+        }
+    
+        // deposit rules:
+        #[inline(never)]
+        fn integrity_of_deposit(
+            program_id: &Pubkey,
+            accounts: &[AccountInfo],
+            quantity: u64
+        ) -> MangoResult<()> {
+            let balance_before: u64 = Self::balance_of(program_id, accounts).unwrap();
+            let total_supply_before: u64 = Self::total_supply_of_token(program_id, accounts).unwrap();
+    
+            Self::deposit(program_id, accounts, quantity);
+    
+            let balance_after: u64 = Self::balance_of(program_id, accounts).unwrap();
+            let total_supply_after: u64 = Self::total_supply_of_token(program_id, accounts).unwrap();
+            
+            CVT_assert(balance_after == balance_before + quantity);
+            CVT_assert(total_supply_after == total_supply_before + quantity);
+            Ok(())
+        }
+    
+        // Withdraw rules:
+        #[inline(never)]
+        fn integrity_of_withdraw(
+            program_id: &Pubkey,
+            accounts: &[AccountInfo],
+            quantity: u64
+        ) -> MangoResult<()> {
+            let balance_before: u64 = Self::balance_of(program_id, accounts).unwrap();
+            let total_supply_before: u64 = Self::total_supply_of_token(program_id, accounts).unwrap();
+    
+            Self::withdraw(program_id, accounts, quantity);
+    
+            let balance_after: u64 = Self::balance_of(program_id, accounts).unwrap();
+            let total_supply_after: u64 = Self::total_supply_of_token(program_id, accounts).unwrap();
+            
+            CVT_assert(balance_after == balance_before - quantity);
+            CVT_assert(total_supply_after == total_supply_before - quantity);
+            Ok(())
+        }
+    
+        #[inline(never)]
+        fn integrity_of_withdraw_should_fail(
+            program_id: &Pubkey,
+            accounts: &[AccountInfo],
+            quantity: u64
+        ) -> MangoResult<()> {
+            let balance_before: u64 = Self::balance_of(program_id, accounts).unwrap();
+            let total_supply_before: u64 = Self::total_supply_of_token(program_id, accounts).unwrap();
+    
+            CVT_assume(balance_before < quantity);
+    
+            Self::withdraw(program_id, accounts, quantity);
+    
+            let balance_after: u64 = Self::balance_of(program_id, accounts).unwrap();
+            let total_supply_after: u64 = Self::total_supply_of_token(program_id, accounts).unwrap();
+            
+            CVT_assert(balance_after == balance_before - quantity);
+            CVT_assert(total_supply_after == total_supply_before - quantity);
+            Ok(())
+        }
+    
+        #[inline(never)]
+        fn deposit_withdraw(
+            program_id: &Pubkey,
+            accounts: &[AccountInfo],
+            quantity: u64
+        ) -> MangoResult<()> {
+            CVT_assume(quantity > 0);
+    
+            let balance_before: u64 = Self::balance_of(program_id, accounts).unwrap();
+            let total_supply_before: u64 = Self::total_supply_of_token(program_id, accounts).unwrap();
+    
+            Self::deposit(program_id, accounts, quantity);
+            Self::withdraw(program_id, accounts, quantity);
+    
+            let balance_after: u64 = Self::balance_of(program_id, accounts).unwrap();
+            let total_supply_after: u64 = Self::total_supply_of_token(program_id, accounts).unwrap();
+    
+            CVT_assert(balance_after == balance_before);
+            CVT_assert(total_supply_after == total_supply_before);
+            Ok(())
+        }
+    
+        // Borrow rules:
+        #[inline(never)]
+        fn integrity_of_borrow(
+            program_id: &Pubkey,
+            accounts: &[AccountInfo],
+            token_index: usize,
+            quantity: u64
+        ) -> MangoResult<()> {
+            let token_balance_before: u64 = Self::balance_of_token(program_id, accounts, token_index).unwrap();
+    
+            Self::borrow(program_id, accounts, token_index, quantity);
+    
+            let token_balance_after: u64 = Self::balance_of_token(program_id, accounts,  token_index).unwrap();
+            
+            CVT_assert(token_balance_after == token_balance_before + quantity);
+            Ok(())
+        }
+
+        #[inline(never)]
+        fn borrow_dont_change_native_total_supply(
+            program_id: &Pubkey,
+            accounts: &[AccountInfo],
+            token_index: usize,
+            quantity: u64
+        ) -> MangoResult<()> {
+            let accounts = array_ref![accounts, 0, NUM_FIXED];
+            let [
+                mango_group_acc,
+                margin_account_acc,
+                owner_acc,
+                token_account_acc,
+                vault_acc,
+                token_prog_acc,
+                clock_acc,
+            ] = accounts;
+
+            let mut mango_group = MangoGroup::load_mut_checked(mango_group_acc, program_id)?;
+            CVT_assume(mango_group.has_valid_deposits_borrows(token_index));
+
+            let total_supply_before: u64 = Self::total_supply_of_token(program_id, accounts).unwrap();
+
+            Self::borrow(program_id, accounts, token_index, quantity);
+
+            let total_supply_after: u64 = Self::total_supply_of_token(program_id, accounts).unwrap();
+    ;
+            CVT_assert(total_supply_after == total_supply_before);
+            Ok(())
+        }
+    // CERTORA RULES END //
+
     #[inline(never)]
     fn init_mango_group(
         program_id: &Pubkey,
